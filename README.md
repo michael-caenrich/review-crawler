@@ -18,17 +18,21 @@ and negative product signals).
 
 ## Current Scope
 Implemented now:
-- JD API-based crawling
-- JD browser-assisted crawling using Playwright + Chrome CDP
-- Auto-click of 全部评价 and 差评 filter
-- Excel export with append-on-save (no overwriting between runs)
+- JD Playwright crawler with auto-click of 全部评价, 差评 and 中评 filters
+- Taobao Playwright crawler with auto-click of 查看全部评价
+- Keyword-based `is_negative` auto-labeling using configurable keyword list
+- Excel export with append-on-save and deduplication per product
 - Placeholder labeling columns for manual annotation
 
 Planned next:
-- Add more platform adapters (for example, Amazon, Taobao/Tmall, and others)
-- Unify crawler interface and output schema
-- Add config-driven crawl jobs and better retry/logging
-- Auto-detect product category from page title
+- [x] Add Taobao platform adapter
+- [x] Unify crawler interface and output schema
+- [x] Add config-driven selectors, product IDs, and file paths
+- [ ] Improve scroll to load more reviews per product
+- [ ] Auto-detect product category from page title
+- [ ] Improve anti-bot detection (random delays, user-agent rotation)
+- [ ] Add more product IDs per category
+- [ ] Add retry/logging for failed products
 
 ---
 
@@ -36,15 +40,17 @@ Planned next:
 ```text
 .
 ├── crawlers/
-│   ├── collect_reviews.py          # JD API crawler
-│   ├── collect_reviews_jd.py       # JD Playwright crawler (main)
-│   └── ... future platform crawlers
+│   ├── collect_reviews_jd.py       # JD Playwright crawler
+│   └── collect_reviews_taobao.py   # Taobao Playwright crawler
 ├── data/
-│   └── reviews_raw.xlsx
+│   ├── jd_reviews_raw.xlsx
+│   └── taobao_reviews_raw.xlsx
 ├── output/
+│   ├── jd_results.xlsx
+│   └── taobao_results.xlsx
 ├── notebooks/
 ├── src/
-├── config.py                       # product IDs, selectors, file paths
+├── config.py                       # product IDs, selectors, keywords, file paths
 └── cli_utils.py
 ```
 
@@ -52,30 +58,33 @@ Planned next:
 
 ## Crawling Notes
 
-### JD API crawler
-- Entry: `crawlers/collect_reviews.py`
-- Uses JD comment API endpoints
-- Best for lightweight batch collection when endpoints remain accessible
-
 ### JD Playwright crawler
 - Entry: `crawlers/collect_reviews_jd.py`
 - Connects to your real Chrome via CDP (`http://127.0.0.1:9222`)
-- Auto-clicks 全部评价 to open the reviews popup
-- Auto-clicks 差评 to filter for negative reviews only
+- Auto-clicks '全部评价' to open the reviews popup
+- Auto-clicks 差评 and '中评' filters to collect negative reviews
 - Falls back to manual click with prompt if auto-click fails
-- Useful when dynamic page rendering or login/session state is required
+- Collects up to `SCROLL_ROUNDS` pages of reviews per filter
+
+### Taobao Playwright crawler
+- Entry: `crawlers/collect_reviews_taobao.py`
+- Connects to your real Chrome via CDP (`http://127.0.0.1:9222`)
+- Auto-clicks '查看全部评价' to open the reviews popup
+- No negative filter available — relies on keyword-based `is_negative` labeling
+- Falls back to manual click with prompt if auto-click fails
 
 ---
 
 ## Data Output Schema (raw)
 Typical output columns:
-- `product_id` — JD product ID
+- `product_id` — platform product ID
 - `review_text` — raw review content
-- `is_negative` — pre-filled with `1` for 差评 reviews (manual verification recommended)
+- `is_negative` — auto-filled via keyword matching (`1` = negative signal, `0` = no match); manual verification recommended
 - `hazard_label` — manual label placeholder for hazard type
 
-Default output path:
-`data/reviews_raw.xlsx`
+Output paths:
+- `data/jd_reviews_raw.xlsx`
+- `data/taobao_reviews_raw.xlsx`
 
 ---
 
@@ -96,15 +105,23 @@ Before running the JD Playwright crawler, launch Chrome with the debug port:
 ```
 Log into JD.com in that window, then run the script.
 
+Before running the Taobo Playwright crawler, launch Chrome with the debug port:
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+    --remote-debugging-port=9222 \
+    --user-data-dir=$HOME/chrome-taobao-profile
+```
+Log into Taobao.com in that window, then run the script.
+
 ---
 
 ## Run Crawlers
 ```bash
-# JD API crawler
-python3 crawlers/collect_reviews.py
-
 # JD Playwright crawler (requires Chrome with debug port — see Local Setup)
 python3 crawlers/collect_reviews_jd.py
+
+# Taobao Playwright crawler (requires Chrome with debug port — see Local Setup)
+python3 crawlers/collect_reviews_taobao.py
 ```
 
 ---

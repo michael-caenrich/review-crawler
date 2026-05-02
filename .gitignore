@@ -22,10 +22,12 @@ venv/
 chrome_session/
 
 # Local data outputs and generated artifacts
-data/reviews_raw.xlsx
+data/
 output/
 
 # Logs and temp files
 *.log
 *.tmp
 
+# Claude
+.claude/
