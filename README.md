@@ -20,15 +20,18 @@ and negative product signals).
 Implemented now:
 - JD Playwright crawler with auto-click of 全部评价, 差评 and 中评 filters
 - Taobao Playwright crawler with auto-click of 查看全部评价
-- Keyword-based `is_negative` auto-labeling using configurable keyword list
+- AliExpress Playwright crawler with 1-star and 2-star filter support
+- Keyword-based `is_negative` auto-labeling using configurable keyword lists (Chinese and English)
 - Excel export with append-on-save and deduplication per product
 - Placeholder labeling columns for manual annotation
 
 Planned next:
 - [x] Add Taobao platform adapter
+- [x] Add AliExpress platform adapter
 - [x] Unify crawler interface and output schema
 - [x] Add config-driven selectors, product IDs, and file paths
-- [ ] Improve scroll to load more reviews per product
+- [x] Improve scroll to load more reviews per product
+- [ ] Add Bright Data Browser API adapter for cloud-based scraping
 - [ ] Auto-detect product category from page title
 - [ ] Improve anti-bot detection (random delays, user-agent rotation)
 - [ ] Add more product IDs per category
@@ -40,14 +43,17 @@ Planned next:
 ```text
 .
 ├── crawlers/
-│   ├── collect_reviews_jd.py       # JD Playwright crawler
-│   └── collect_reviews_taobao.py   # Taobao Playwright crawler
+│   ├── collect_reviews_jd.py           # JD Playwright crawler
+│   ├── collect_reviews_taobao.py       # Taobao Playwright crawler
+│   └── collect_reviews_aliexpress.py   # AliExpress Playwright crawler
 ├── data/
 │   ├── jd_reviews_raw.xlsx
-│   └── taobao_reviews_raw.xlsx
+│   ├── taobao_reviews_raw.xlsx
+│   └── aliexpress_reviews_raw.xlsx
 ├── output/
 │   ├── jd_results.xlsx
-│   └── taobao_results.xlsx
+│   ├── taobao_results.xlsx
+│   └── aliexpress_results.xlsx
 ├── notebooks/
 ├── src/
 ├── config.py                       # product IDs, selectors, keywords, file paths
@@ -73,6 +79,13 @@ Planned next:
 - No negative filter available — relies on keyword-based `is_negative` labeling
 - Falls back to manual click with prompt if auto-click fails
 
+### AliExpress Playwright crawler
+- Entry: `crawlers/collect_reviews_aliexpress.py`
+- Connects to your real Chrome via CDP (`http://127.0.0.1:9222`)
+- Auto-clicks 'View more' to open the reviews popup
+- Auto-clicks 1-star and 2-star filters to collect negative reviews
+- Falls back to manual click with prompt if auto-click fails
+
 ---
 
 ## Data Output Schema (raw)
@@ -85,6 +98,7 @@ Typical output columns:
 Output paths:
 - `data/jd_reviews_raw.xlsx`
 - `data/taobao_reviews_raw.xlsx`
+- `data/aliexpress_reviews_raw.xlsx`
 
 ---
 
@@ -105,13 +119,21 @@ Before running the JD Playwright crawler, launch Chrome with the debug port:
 ```
 Log into JD.com in that window, then run the script.
 
-Before running the Taobo Playwright crawler, launch Chrome with the debug port:
+Before running the Taobao Playwright crawler, launch Chrome with the debug port:
 ```bash
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
     --remote-debugging-port=9222 \
     --user-data-dir=$HOME/chrome-taobao-profile
 ```
 Log into Taobao.com in that window, then run the script.
+
+Before running the AliExpress Playwright crawler, launch Chrome with the debug port:
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+    --remote-debugging-port=9222 \
+    --user-data-dir=$HOME/chrome-aliexpress-profile
+```
+Log into AliExpress.com in that window, then run the script.
 
 ---
 
@@ -122,6 +144,9 @@ python3 crawlers/collect_reviews_jd.py
 
 # Taobao Playwright crawler (requires Chrome with debug port — see Local Setup)
 python3 crawlers/collect_reviews_taobao.py
+
+# AliExpress Playwright crawler (requires Chrome with debug port — see Local Setup)
+python3 crawlers/collect_reviews_aliexpress.py
 ```
 
 ---

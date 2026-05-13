@@ -60,12 +60,11 @@ def click_all_reviews_button(page: Page) -> bool | None:
     return None if not button_found else False
 
 
-def click_review_filter(page: Page, filter_key: str) -> bool | None:
-    """Click a review filter button by key. Returns True if successful, False if click failed, None if not found."""
+def click_review_filter(page: Page, filter_key: str) -> None:
+    """Click a review filter button by key."""
     if filter_key not in JD_SELECTORS:
         raise KeyError(f"Missing selector key '{filter_key}' in JD_SELECTORS in config.py")
 
-    button_found = False
     for selector in JD_SELECTORS[filter_key]:
         btn = page.locator(selector).first
         print(f"{colorize('[INFO]')} Trying selector for key '{filter_key}': {selector}")
@@ -73,31 +72,32 @@ def click_review_filter(page: Page, filter_key: str) -> bool | None:
             print(f"{colorize('[WARNING]')} Selector for key '{filter_key}' not found: {selector}")
             continue
 
-        button_found = True
         try:
             human_click(page, btn)
             # wait for stale cards to leave DOM before waiting for filtered ones to appear
             page.wait_for_selector(REVIEW_CARD_SELECTOR, state="detached", timeout=5000)
             page.wait_for_selector(REVIEW_CARD_SELECTOR, timeout=5000)
             print(f"{colorize('[OK]')} Clicked '{filter_key}' — filter applied.")
-            return True
+            return
         except Exception as e:
             print(f"{colorize('[WARNING]')} Failed to click filter '{filter_key}': {e}")
-
-    return None if not button_found else False
 
 
 def scroll_popup_to_load_more(page: Page) -> None:
     """Scroll inside the popup to trigger lazy-loaded reviews."""
     print(f"{colorize('[INFO]')} Scrolling to load more reviews...")
+    prev_count = 0
 
-    for i in range(SCROLL_ROUNDS):
+    for _ in range(SCROLL_ROUNDS):
         try:
             cards = page.locator(REVIEW_CARD_SELECTOR)
             count = cards.count()
             if count == 0:
                 print(f"{colorize('[WARNING]')} No review cards found to scroll to.")
                 return
+            if count == prev_count:
+                break
+            prev_count = count
             cards.nth(count - 1).scroll_into_view_if_needed(timeout=3000)
         except Exception as e:
             print(f"{colorize('[WARNING]')} Scroll failed: {e}")
@@ -105,7 +105,7 @@ def scroll_popup_to_load_more(page: Page) -> None:
         page.wait_for_timeout(random.randint(1500, 3000))
 
     total = page.locator(REVIEW_CARD_SELECTOR).count()
-    print(f"{colorize('[INFO]')} Found {total} reviews after scrolling")
+    print(f"{colorize('[INFO]')} Found {total} reviews")
 
 
 def human_click(page: Page, btn: Locator) -> None:
@@ -136,7 +136,6 @@ def extract_reviews(page: Page, product_id: int) -> list[dict[str, object]]:
     if count == 0:
         print(f"{colorize('[WARNING]')} No review text found — selector may have changed.")
         return reviews
-    print(f"{colorize('[INFO]')} Found {count} review text elements.")
 
     for i in range(count):
         try:
@@ -180,13 +179,11 @@ def get_reviews(product_id: int) -> list[dict[str, object]]:
         reviews = []
         for key_filter in ["差评", "中评"]:
             print(f"{colorize('[INFO]')} Trying to click '{key_filter}'...")
-            result = click_review_filter(page, key_filter)
-            if result is None:
-                print(f"{colorize('[INFO]')} No '{key_filter}' filter found for product '{product_id}'")
+            click_review_filter(page, key_filter)
+
+            if page.locator(REVIEW_TEXT_SELECTOR).count() == 0:
+                print(f"{colorize('[INFO]')} No reviews found for '{key_filter}' filter")
                 continue
-            elif not result:
-                print(f"{colorize('[WARNING]')} Auto-click failed. Please click '{key_filter}' manually.")
-                input(f"{colorize('[INFO]')} Press Enter... ")
 
             scroll_popup_to_load_more(page)
             reviews.extend(extract_reviews(page, product_id))

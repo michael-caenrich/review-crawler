@@ -29,5 +29,5 @@ output/
 *.log
 *.tmp
 
-# Claude
-.claude/
+# Tests
+tests/

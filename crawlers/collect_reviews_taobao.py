@@ -68,13 +68,17 @@ def scroll_popup_to_load_more(page: Page) -> None:
     """Scroll inside the popup to trigger lazy-loaded reviews."""
     print(f"{colorize('[INFO]')} Scrolling to load more reviews...")
 
-    for i in range(SCROLL_ROUNDS):
+    prev_count = 0
+    for _ in range(SCROLL_ROUNDS):
         try:
             cards = page.locator(REVIEW_CARD_SELECTOR)
             count = cards.count()
             if count == 0:
                 print(f"{colorize('[WARNING]')} No review cards found to scroll to.")
                 return
+            if count == prev_count:
+                break
+            prev_count = count
             cards.nth(count - 1).scroll_into_view_if_needed(timeout=3000)
         except Exception as e:
             print(f"{colorize('[WARNING]')} Scroll failed: {e}")
@@ -82,7 +86,7 @@ def scroll_popup_to_load_more(page: Page) -> None:
         page.wait_for_timeout(random.randint(1000, 2000))
 
     total = page.locator(REVIEW_CARD_SELECTOR).count()
-    print(f"{colorize('[INFO]')} Found {total} reviews after scrolling")
+    print(f"{colorize('[INFO]')} Found {total} reviews")
 
 
 def extract_reviews(page: Page, product_id: int) -> list[dict[str, object]]:
@@ -94,7 +98,6 @@ def extract_reviews(page: Page, product_id: int) -> list[dict[str, object]]:
     if count == 0:
         print(f"{colorize('[WARNING]')} No review text found — selector may have changed.")
         return reviews
-    print(f"{colorize('[INFO]')} Found {count} review text elements.")
 
     for i in range(count):
         try:
