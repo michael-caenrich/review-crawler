@@ -84,7 +84,8 @@ Planned next:
 - Connects to your real Chrome via CDP (`http://127.0.0.1:9222`)
 - Auto-clicks 'View more' to open the reviews popup
 - Auto-clicks 1-star and 2-star filters to collect negative reviews
-- Falls back to manual click with prompt if auto-click fails
+- Falls back to manual click with prompt if 'View more' auto-click fails
+- Skips a star filter silently if no reviews load after clicking
 
 ---
 
