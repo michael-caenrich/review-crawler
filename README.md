@@ -21,6 +21,8 @@ Implemented now:
 - JD Playwright crawler with auto-click of 全部评价, 差评 and 中评 filters
 - Taobao Playwright crawler with auto-click of 查看全部评价
 - AliExpress Playwright crawler with 1-star and 2-star filter support
+- AliExpress US category ID collector — scrapes product IDs from any category page
+- AliExpress US review crawler — reads IDs from JSON, skips high-rated products, detects captcha
 - Keyword-based `is_negative` auto-labeling using configurable keyword lists (Chinese and English)
 - Excel export with append-on-save and deduplication per product
 - Placeholder labeling columns for manual annotation
@@ -31,11 +33,10 @@ Planned next:
 - [x] Unify crawler interface and output schema
 - [x] Add config-driven selectors, product IDs, and file paths
 - [x] Improve scroll to load more reviews per product
-- [ ] Add Bright Data Browser API adapter for cloud-based scraping
-- [ ] Auto-detect product category from page title
-- [ ] Improve anti-bot detection (random delays, user-agent rotation)
-- [ ] Add more product IDs per category
-- [ ] Add retry/logging for failed products
+- [x] Improve anti-bot detection (random delays, human-like scroll pauses)
+- [x] Add more product IDs per category via category page scraper
+- [ ] AliExpress US review crawler — replace Playwright with reverse-engineered API calls
+- [ ] AliExpress US ID collector — replace Playwright with reverse-engineered API calls
 
 ---
 
@@ -43,20 +44,20 @@ Planned next:
 ```text
 .
 ├── crawlers/
-│   ├── collect_reviews_jd.py           # JD Playwright crawler
-│   ├── collect_reviews_taobao.py       # Taobao Playwright crawler
-│   └── collect_reviews_aliexpress.py   # AliExpress Playwright crawler
+│   ├── aliexpress_us/
+│   │   ├── collect_ids_aliexpress_us.py     # scrapes product IDs from a category page
+│   │   └── collect_reviews_aliexpress_us.py # collects reviews from IDs JSON
+│   ├── collect_reviews_jd.py
+│   ├── collect_reviews_taobao.py
+│   └── collect_reviews_aliexpress.py
 ├── data/
+│   ├── aliexpress_us/
+│   │   ├── aliexpress_us_{category}_{count}_ids.json
+│   │   └── aliexpress_us_{category}_reviews_raw.xlsx
 │   ├── jd_reviews_raw.xlsx
-│   ├── taobao_reviews_raw.xlsx
-│   └── aliexpress_reviews_raw.xlsx
+│   └── taobao_reviews_raw.xlsx
 ├── output/
-│   ├── jd_results.xlsx
-│   ├── taobao_results.xlsx
-│   └── aliexpress_results.xlsx
-├── notebooks/
-├── src/
-├── config.py                       # product IDs, selectors, keywords, file paths
+├── config.py                       # selectors, keywords, file paths
 └── cli_utils.py
 ```
 
@@ -70,7 +71,7 @@ Planned next:
 - Auto-clicks '全部评价' to open the reviews popup
 - Auto-clicks 差评 and '中评' filters to collect negative reviews
 - Falls back to manual click with prompt if auto-click fails
-- Collects up to `SCROLL_ROUNDS` pages of reviews per filter
+- Scrolls all available reviews per filter with human-like pauses
 
 ### Taobao Playwright crawler
 - Entry: `crawlers/collect_reviews_taobao.py`
@@ -87,6 +88,23 @@ Planned next:
 - Falls back to manual click with prompt if 'View more' auto-click fails
 - Skips a star filter silently if no reviews load after clicking
 
+### AliExpress US crawler (two-step workflow)
+
+**Step 1 — Collect product IDs**
+- Entry: `crawlers/aliexpress_us/collect_ids_aliexpress_us.py`
+- Opens AliExpress homepage, lists categories, user picks one
+- Scrolls category page to load products with human-like pauses
+- If IDs file for this category already exists, merges new IDs and saves with updated count
+- Saves IDs to `data/aliexpress_us/aliexpress_us_{category}_{count}_ids.json`
+
+**Step 2 — Collect reviews**
+- Entry: `crawlers/aliexpress_us/collect_reviews_aliexpress_us.py`
+- Reads IDs from the JSON produced in step 1
+- Skips products with rating ≥ 4.8 or fewer than 10 reviews
+- Detects captcha, plays alert sound, saves progress, waits for manual solve
+- Batch-saves every 5 products to prevent data loss
+- Pauses every 100 products for a manual break
+
 ---
 
 ## Data Output Schema (raw)
@@ -100,6 +118,7 @@ Output paths:
 - `data/jd_reviews_raw.xlsx`
 - `data/taobao_reviews_raw.xlsx`
 - `data/aliexpress_reviews_raw.xlsx`
+- `data/aliexpress_us/aliexpress_us_{category}_reviews_raw.xlsx`
 
 ---
 

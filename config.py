@@ -89,29 +89,21 @@ NEGATIVE_KEYWORDS_EN = [
 ]
 
 # AliExpress setup
-ALIEXPRESS_DATA_PATH = BASE_DIR / "data" / "aliexpress_reviews_raw.xlsx"
+ALIEXPRESS_IDS_CATEGORY = "toys_games"  # update when switching categories
+ALIEXPRESS_CATEGORY_IDS_DIR = BASE_DIR / "data" / "aliexpress_us"
+ALIEXPRESS_DATA_PATH = ALIEXPRESS_CATEGORY_IDS_DIR / f"aliexpress_us_{ALIEXPRESS_IDS_CATEGORY}_reviews_raw.xlsx"
 ALIEXPRESS_OUTPUT_PATH = BASE_DIR / "output" / "aliexpress_results.xlsx"
 
 ALIEXPRESS_SELECTORS = {
+    "category": "[href*='categoryTab']",
+    "product_link": "a[href*='/item/']",
     "view_more": "#nav-review button[class*=v3--btn]",
     "ratings_dropdown": ".comet-v2-modal-content [class*=filterItem]:first-child button",
     "1_star": "li:has-text('1 Star')",
     "2_star": "li:has-text('2 Star')",
     "review_container": ".comet-v2-modal-content [class*=itemContent]",
     "review_text": ".comet-v2-modal-content [class*=itemReview]",
+    "rating": "a[class*='reviewer--rating'] strong",
+    "reviews": "a[class*='reviewer--reviews']",
+    "captcha": ["#captcha", "[class*='rc-anchor']", "iframe[src*='recaptcha']"],
 }
-
-ALIEXPRESS_PRODUCT_IDS = [
-    # 玩具
-    3256805966506572,
-    3256806737170819,
-    3256807549555704,
-    3256811437942379,
-    # 爱护儿童品
-    3256809812110929,
-    3256809965931098,
-    # 童装
-    3256805861450624,
-    3256808427397420,
-    3256806767440010,
-]
