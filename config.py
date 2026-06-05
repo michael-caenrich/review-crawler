@@ -1,8 +1,19 @@
 """Store input, output file paths, negative keywords, selectors, product IDs for JD and Taobao platforms."""
 
+import json
 import pathlib
 
 CDP_URL = "http://127.0.0.1:9222"
+
+CDP_INSTRUCTION = """
+1. Quit Chrome completely.
+2. Reopen Chrome with a dedicated debug profile:
+   /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\
+       --remote-debugging-port=9222 \\
+       --user-data-dir=$HOME/chrome-aliexpress-profile
+3. Log into AliExpress.com in that Chrome window if not logged in yet.
+4. Press Enter to continue.
+"""
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 
@@ -19,62 +30,6 @@ NEGATIVE_KEYWORDS = [
     "退货", "退款", "失望",
 ]
 
-# JD setup
-JD_DATA_PATH = BASE_DIR / "data" / "jd_reviews_raw.xlsx"
-JD_OUTPUT_PATH = BASE_DIR / "output" / "jd_results.xlsx"
-
-JD_SELECTORS = {
-    "全部评价": ["#comment-root > div.all-btn > div", "text=全部评价"], # #nav-review > div > button
-    "差评": ["#rateList span:has-text('差评')", "text=差评"],
-    "中评": ["#rateList span:has-text('中评')", "text=中评"],
-    "review_card": ".jdc-pc-rate-card",
-    "review_text": ".jdc-pc-rate-card-main-desc",
-}
-
-JD_PRODUCT_IDS = [
-    # 玩具
-    100112573693,
-    100011166107,
-    100190960941,
-    # # 儿童护肤
-    100014327793,
-    100331533320,
-    10151921151284,
-    # 童装
-    100320215916,
-    10153675447623,
-    100240028873,
-    # 充电器
-    100043899267,
-    100266373302,
-    100251221945,
-]
-
-# Taobao setup
-TAOBAO_DATA_PATH = BASE_DIR / "data" / "taobao_reviews_raw.xlsx"
-TAOBAO_OUTPUT_PATH = BASE_DIR / "output" / "taobao_results.xlsx"
-
-TAOBAO_SELECTORS = {
-    "查看全部评价": [".footer--gVLORU06 > div", "text=查看全部评价"],
-    "review_card": ".Comment--H5QmJwe9",
-    "review_text": ".content--uonoOhaz",
-}
-
-TAOBAO_PRODUCT_IDS = [
-    # 玩具
-    1025853085451,
-    696791403725,
-    987359046806,
-    # 儿童护肤
-    1019878723701,
-    962108711151,
-    901039506585,
-    # 童装
-    932590730362,
-    836860921639,
-    737445350142,
-]
-
 NEGATIVE_KEYWORDS_EN = [
     # Safety hazards
     "irritat", "allerg", "rash", "burn", "dangerous", "hazard", "toxic", "chok",
@@ -89,10 +44,13 @@ NEGATIVE_KEYWORDS_EN = [
 ]
 
 # AliExpress setup
+ALIEXPRESS_URL = "https://www.aliexpress.com"
+
 ALIEXPRESS_IDS_CATEGORY = "toys_games"  # update when switching categories
-ALIEXPRESS_CATEGORY_IDS_DIR = BASE_DIR / "data" / "aliexpress_us"
-ALIEXPRESS_DATA_PATH = ALIEXPRESS_CATEGORY_IDS_DIR / f"aliexpress_us_{ALIEXPRESS_IDS_CATEGORY}_reviews_raw.xlsx"
-ALIEXPRESS_OUTPUT_PATH = BASE_DIR / "output" / "aliexpress_results.xlsx"
+ALIEXPRESS_DATA_PATH = BASE_DIR / "data" / "aliexpress_us"
+ALIEXPRESS_REVIEWS_PATH = ALIEXPRESS_DATA_PATH / f"aliexpress_us_{ALIEXPRESS_IDS_CATEGORY}_reviews_raw.xlsx"
+ALIEXPRESS_OUTPUT_PATH = BASE_DIR / "output" / "aliexpress_us_results.xlsx"
+COOKIES_PATH = ALIEXPRESS_DATA_PATH / "aliexpress_us_api_cookies.json"
 
 ALIEXPRESS_SELECTORS = {
     "category": "[href*='categoryTab']",
@@ -107,3 +65,7 @@ ALIEXPRESS_SELECTORS = {
     "reviews": "a[class*='reviewer--reviews']",
     "captcha": ["#captcha", "[class*='rc-anchor']", "iframe[src*='recaptcha']"],
 }
+
+ALIEXPRESS_CATEGORIES_US = json.loads(
+    (ALIEXPRESS_DATA_PATH / "aliexpress_us_category_queries.json").read_text()
+)

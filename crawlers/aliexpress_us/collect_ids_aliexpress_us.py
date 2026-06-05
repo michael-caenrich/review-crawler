@@ -20,24 +20,17 @@ Output:
     - data/aliexpress_us/aliexpress_us_{category}_{count}_ids.json
 """
 import json
-import pathlib
 import random
 import re
 import time
 
 from playwright.sync_api import Page, sync_playwright
 
-from cli_utils import colorize
-from config import CDP_URL, ALIEXPRESS_CATEGORY_IDS_DIR, ALIEXPRESS_SELECTORS
+from cli_utils import colorize, find_ids_file, ask_max_ids
+from config import CDP_URL, ALIEXPRESS_DATA_PATH, ALIEXPRESS_SELECTORS
 
 ALIEXPRESS_HOME = "https://www.aliexpress.com"
 PRODUCT_ID_RE = re.compile(r"/item/(\d+)\.html")
-DEFAULT_MAX_IDS = 1000
-
-
-def find_existing_file(category_slug: str) -> pathlib.Path | None:
-    """Return the existing IDs file for this category, or None if not found."""
-    return next(ALIEXPRESS_CATEGORY_IDS_DIR.glob(f"aliexpress_us_{category_slug}_*_ids.json"), None)
 
 
 def fetch_categories(page: Page) -> list[dict]:
@@ -70,22 +63,6 @@ def pick_category(categories: list[dict]) -> dict:
         if raw.isdigit() and 1 <= int(raw) <= len(categories):
             return categories[int(raw) - 1]
         print(f"{colorize('[WARNING]')} Enter a number between 1 and {len(categories)}.")
-
-
-def ask_max_ids(existing_count: int = 0) -> int:
-    """Prompt the user for how many product IDs to collect."""
-    if existing_count:
-        prompt = f"\n{colorize('[INFO]')} File already has {existing_count} IDs. How many more to add? "
-    else:
-        prompt = f"\n{colorize('[INFO]')} How many product IDs to collect? (default {DEFAULT_MAX_IDS}): "
-
-    while True:
-        raw = input(prompt).strip()
-        if not raw and not existing_count:
-            return DEFAULT_MAX_IDS
-        if raw.isdigit() and int(raw) > 0:
-            return int(raw)
-        print(f"{colorize('[WARNING]')} Enter a positive number.")
 
 
 def scroll_to_load_all(page: Page, max_ids: int) -> None:
@@ -138,8 +115,8 @@ def extract_ids(page: Page) -> list[int]:
 
 def save_ids(ids: list[int], category_slug: str) -> None:
     """Write IDs to JSON file named with platform, category, and count."""
-    path = ALIEXPRESS_CATEGORY_IDS_DIR / f"aliexpress_us_{category_slug}_{len(ids)}_ids.json"
-    ALIEXPRESS_CATEGORY_IDS_DIR.mkdir(parents=True, exist_ok=True)
+    path = ALIEXPRESS_DATA_PATH / f"aliexpress_us_{category_slug}_{len(ids)}_ids.json"
+    ALIEXPRESS_DATA_PATH.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(ids, indent=2))
     print(f"{colorize('[DONE]')} Saved {len(ids)} IDs to {path.name}")
 
@@ -168,7 +145,7 @@ def main() -> None:
         chosen = pick_category(categories)
         slug = re.sub(r"[^a-z0-9]+", "_", chosen["name"].lower()).strip("_")
 
-        existing_file = find_existing_file(slug)
+        existing_file = find_ids_file(ALIEXPRESS_DATA_PATH, slug)
         existing_ids: list[int] = []
         if existing_file:
             existing_ids = json.loads(existing_file.read_text())

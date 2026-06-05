@@ -4,7 +4,7 @@ Collect 1-star and 2-star reviews from AliExpress using Chrome debug profile.
 Before running:
     1. Quit Chrome completely.
     2. Reopen Chrome with a dedicated debug profile:
-       /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+       /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \
            --remote-debugging-port=9222 \
            --user-data-dir=$HOME/chrome-aliexpress-profile
     3. Log into AliExpress in that Chrome window.
@@ -27,7 +27,6 @@ from config import (
     CDP_URL,
     ALIEXPRESS_DATA_PATH,
     ALIEXPRESS_IDS_CATEGORY,
-    ALIEXPRESS_CATEGORY_IDS_DIR,
     ALIEXPRESS_SELECTORS,
     NEGATIVE_KEYWORDS_EN,
 )
@@ -308,7 +307,7 @@ def main() -> None:
         context = browser.contexts[0] if browser.contexts else browser.new_context()
         page = context.new_page()
 
-        ids_file = find_ids_file(ALIEXPRESS_CATEGORY_IDS_DIR, f"aliexpress_us_{ALIEXPRESS_IDS_CATEGORY}_*_ids.json")
+        ids_file = find_ids_file(ALIEXPRESS_DATA_PATH, f"aliexpress_us_{ALIEXPRESS_IDS_CATEGORY}_*_ids.json")
         product_ids = json.loads(ids_file.read_text())[:MAX_PRODUCTS]
         print(f"\n{colorize('[INFO]')} Collecting reviews for: {ids_file.stem}")
 
@@ -317,7 +316,7 @@ def main() -> None:
             reviews = get_reviews(page, pid)
 
             while reviews is None:
-                play_alert_sound()
+                play_alert_sound("Ping")
                 if all_reviews:
                     save_reviews(all_reviews)
                 elapsed = int(time.time() - captcha_start)
