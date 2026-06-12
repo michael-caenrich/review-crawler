@@ -2,23 +2,25 @@
 Collect AliExpress product IDs via search/browse API.
 
 Uses aliexpress.us/fn/search-pc/index — supports real pagination (60+ pages per subcategory).
-No token signing needed, just session cookies. Uses Chrome CDP to automate cookie
-refreshment when bot detection or auth errors occur.
+No token signing needed, just session cookies.
 
 Before running:
-    1. Quit Chrome completely.
-    2. Reopen Chrome with a dedicated debug profile:
-       /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \
-           --remote-debugging-port=9222 \
-           --user-data-dir=$HOME/chrome-aliexpress-profile
-    3. Log into AliExpress in that Chrome window.
-    4. Run this script.
+    1. Log into aliexpress.us in your browser.
+    2. Open DevTools → Network → Headers (Request Headers → Cookie).
+    3. Copy cookie as a single string.
+    4. Paste into data/aliexpress_us/raw_cookies.txt.
+    5. Run this script — you will be prompted to press Enter to continue.
 
 Flow:
     1. User picks a category.
     2. Script iterates through all subcategories automatically.
     3. Collects all available product IDs from each subcategory.
     4. Saves deduplicated results to one JSON file per category.
+
+Note:
+    AliExpress blocks by IP after ~100 requests. When blocked, the script saves
+    progress and prompts to rotate VPN before resuming. Blocks are temporary (~30-40 min),
+    rotating through 10 IPs is sufficient.
 """
 
 import json
@@ -31,24 +33,25 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 import requests
-from playwright.sync_api import sync_playwright
 
 from cli_utils import (
     colorize,
+    format_elapsed,
     play_alert_sound,
     find_ids_file,
-    refresh_cookies_cdp,
+    get_cookies,
     TokenExpiredError,
+    RateLimitError,
 )
 from config import (
-    ALIEXPRESS_DATA_PATH,
+    ALIEXPRESS_IDS_PATH,
     ALIEXPRESS_CATEGORIES_US,
-    ALIEXPRESS_URL, CDP_URL,
-    CDP_INSTRUCTION,
+    COOKIES_PATH,
 )
 
 API_URL = "https://www.aliexpress.us/fn/search-pc/index"
 PAGE_VERSION = "7ece9c0cc9cf2052db74f0d1b26b7033"
+START_FROM_SUBCATEGORY = "Interlocking & Magnetic Blocks"  # set to "" to run all
 
 HEADERS = {
     "accept": "*/*",
@@ -66,7 +69,7 @@ HEADERS = {
 
 def print_categories() -> None:
     """Print numbered list of available AliExpress US categories."""
-    print(f"\n{colorize('[INFO]')}===== AliExpress Categories US =====")
+    print(f"\n{colorize('[INFO]')} ===== AliExpress Categories US =====")
     for i, category in enumerate(ALIEXPRESS_CATEGORIES_US, start=1):
         print(f"{i}. {category}")
 
@@ -103,25 +106,32 @@ def fetch_page(session: requests.Session, query: str, page: int, stream_id: str 
         },
         "dependency": [],
     }
-    try:
-        xsrf = session.cookies.get("XSRF-TOKEN", "")
-        headers = {**HEADERS, "x-xsrf-token": xsrf} if xsrf else HEADERS
-        resp = session.post(API_URL, json=body, headers=headers, timeout=15)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        print(f"{colorize('[WARNING]')} Request failed: {e}")
-        return None
+    xsrf = session.cookies.get("XSRF-TOKEN", "")
+    headers = {**HEADERS, "x-xsrf-token": xsrf} if xsrf else HEADERS
+    for attempt in range(3):
+        try:
+            resp = session.post(API_URL, json=body, headers=headers, timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            print(f"{colorize('[WARNING]')} Request failed (attempt {attempt + 1}/3): {e}")
+            if attempt < 2:
+                time.sleep(5)
+    return None
 
 
 def extract_ids(response: dict) -> tuple[list[str], str]:
     """Extract product IDs and next streamId from the API response, raising on auth or bot errors."""
-    if response.get("x5step") or response.get("rgv587_flag"):
-        raise TokenExpiredError(f"Bot detected: {response.get('ret', [])}")
-
     ret = response.get("ret", [])
+
+    if ret and any("RGV587" in r for r in ret):
+        raise RateLimitError(ret)
+
+    if response.get("x5step") or response.get("rgv587_flag"):
+        raise RateLimitError(ret)
+
     if ret and any("USER_VALIDATE" in r or "ILLEGAL" in r or "FAIL_AUTH" in r for r in ret):
-        raise TokenExpiredError(f"Auth failed: {ret}")
+        raise TokenExpiredError(ret)
 
     result = response.get("data", {}).get("result", {})
     content = result.get("mods", {}).get("itemList", {}).get("content", [])
@@ -131,7 +141,7 @@ def extract_ids(response: dict) -> tuple[list[str], str]:
     return ids, stream_id
 
 
-def collect_subcategory(session: requests.Session, page, subcategory_name: str, query: str, seen_ids: set) -> list[dict]:
+def collect_subcategory(session: requests.Session, subcategory_name: str, query: str, seen_ids: set, all_entries: list[dict] | None = None, category_name: str = "", existing_file=None) -> list[dict]:
     """Collect all available product IDs for one subcategory, skipping already seen IDs."""
     new_entries = []
     page_num = 1
@@ -150,10 +160,26 @@ def collect_subcategory(session: requests.Session, page, subcategory_name: str, 
                     return new_entries
                 ids, stream_id = extract_ids(response)
                 break
+            except RateLimitError as e:
+                elapsed = int(time.time() - session_start)
+                play_alert_sound("Ping")
+                print(f"{colorize('[WARNING]')} {e} — IP blocked after {format_elapsed(elapsed)}.")
+                if all_entries is not None:
+                    save_ids(all_entries + new_entries, category_name, existing_file=existing_file)
+                print(f"{colorize('[INFO]')} Rotate your IP (VPN) and press Enter...")
+                input()
+                session_start = time.time()
             except TokenExpiredError as e:
                 elapsed = int(time.time() - session_start)
-                print(f"{colorize('[WARNING]')} {e} — refreshing cookies after {elapsed // 60}m {elapsed % 60}s...")
-                refresh_cookies_cdp(session, page)
+                play_alert_sound("Ping")
+                print(f"{colorize('[WARNING]')} {e} — refreshing cookies after {format_elapsed(elapsed)}...")
+                if all_entries is not None and all_entries:
+                    save_ids(all_entries + new_entries, category_name, existing_file=existing_file)
+                print(f"\n{colorize('[INFO]')} Paste fresh cookies into raw_cookies.txt and press Enter...")
+                input()
+                get_cookies()
+                session.cookies.update(json.loads(COOKIES_PATH.read_text()))
+                time.sleep(60)
                 session_start = time.time()
 
         if not ids:
@@ -175,83 +201,83 @@ def collect_subcategory(session: requests.Session, page, subcategory_name: str, 
 
 def save_ids(entries: list[dict], category_name: str, existing_file: pathlib.Path | None = None) -> pathlib.Path:
     """Save product ID entries. Overwrites existing file or creates a new one."""
-    ALIEXPRESS_DATA_PATH.mkdir(parents=True, exist_ok=True)
+    ALIEXPRESS_IDS_PATH.mkdir(parents=True, exist_ok=True)
     if existing_file:
         path = existing_file
     else:
         category_slug = re.sub(r"[^a-z0-9]+", "_", category_name.lower()).strip("_")
-        path = ALIEXPRESS_DATA_PATH / f"aliexpress_us_{category_slug}_ids.json"
+        path = ALIEXPRESS_IDS_PATH / f"aliexpress_us_{category_slug}_ids.json"
     path.write_text(json.dumps(entries, indent=2))
     print(f"{colorize('[DONE]')} Saved {len(entries)} IDs to {path.name}")
     return path
 
 
 def main() -> None:
-    """Open Chrome via CDP, let user pick a category, collect all subcategory IDs, and save to JSON."""
-    print(CDP_INSTRUCTION)
-    input()
-
+    """Collect AliExpress product IDs with manual cookie refresh."""
     start = time.time()
-    with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(CDP_URL)
-        context = browser.contexts[0] if browser.contexts else browser.new_context()
-        page = context.new_page()
-        page.goto(ALIEXPRESS_URL, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(random.randint(2000, 5000))
+    print(f"{colorize('[INFO]')} Paste fresh cookies into raw_cookies.txt and press Enter...")
+    input()
+    get_cookies()
+    session = requests.Session()
+    session.cookies.update(json.loads(COOKIES_PATH.read_text()))
 
-        session = requests.Session()
-        refresh_cookies_cdp(session, page)
+    print_categories()
+    choice = pick_category()
+    categories_to_run = list(ALIEXPRESS_CATEGORIES_US.items()) if choice is None else [(choice[0], choice[1])]
 
-        print_categories()
-        choice = pick_category()
-        categories_to_run = list(ALIEXPRESS_CATEGORIES_US.items()) if choice is None else [(choice[0], choice[1])]
+    for category_name, category_data in categories_to_run:
+        print(f"\n{colorize('[INFO]')} ===== {category_name} =====")
+        subcategories = category_data["subcategories"]
+        category_slug = re.sub(r"[^a-z0-9]+", "_", category_name.lower()).strip("_")
+        existing_entries: list[dict] = []
 
-        for category_name, category_data in categories_to_run:
-            print(f"\n{colorize('[INFO]')} ===== {category_name} =====")
-            subcategories = category_data["subcategories"]
-            category_slug = re.sub(r"[^a-z0-9]+", "_", category_name.lower()).strip("_")
-            existing_entries: list[dict] = []
+        try:
+            existing_file = find_ids_file(ALIEXPRESS_IDS_PATH, f"aliexpress_us_{category_slug}_ids.json")
+            existing_entries = json.loads(existing_file.read_text())
+            print(f"{colorize('[INFO]')} Found existing file: {existing_file.name}")
+        except FileNotFoundError:
+            existing_file = None
 
-            try:
-                existing_file = find_ids_file(ALIEXPRESS_DATA_PATH, f"aliexpress_us_{category_slug}_ids.json")
-                existing_entries = json.loads(existing_file.read_text())
-                print(f"{colorize('[INFO]')} Found existing file: {existing_file.name}")
-            except FileNotFoundError:
-                existing_file = None
+        existing_entries = [
+            e if isinstance(e, dict) else {"id": str(e), "subcategory": ""}
+            for e in existing_entries
+        ]
 
-            existing_entries = [
-                e if isinstance(e, dict) else {"id": str(e), "subcategory": ""}
-                for e in existing_entries
-            ]
+        if existing_entries:
+            answer = input(f"\n{colorize('[INFO]')} File already has {len(existing_entries)} IDs. Continue adding? (y/n): ").strip().lower()
+            if answer != "y":
+                print(f"{colorize('[INFO]')} Skipping {category_name}.")
+                continue
 
-            if existing_entries:
-                answer = input(f"\n{colorize('[INFO]')} File already has {len(existing_entries)} IDs. Continue adding? (y/n): ").strip().lower()
-                if answer != "y":
-                    print(f"{colorize('[INFO]')} Skipping {category_name}.")
-                    continue
+        seen_ids = {str(e["id"]) for e in existing_entries}
+        all_entries = list(existing_entries)
 
-            seen_ids = {str(e["id"]) for e in existing_entries}
-            all_entries = list(existing_entries)
+        subcategory_names = list(subcategories.keys())
+        start_index = subcategory_names.index(START_FROM_SUBCATEGORY) if START_FROM_SUBCATEGORY and START_FROM_SUBCATEGORY in subcategory_names else 0
+        if start_index:
+            print(f"{colorize('[INFO]')} Resuming from subcategory: {START_FROM_SUBCATEGORY}")
 
-            for i, (subcategory_name, query) in enumerate(subcategories.items(), start=1):
-                print(f"\n{colorize('[INFO]')} [{i}/{len(subcategories)}] {subcategory_name}")
-                new_entries = collect_subcategory(session, page, subcategory_name, query, seen_ids)
-                all_entries.extend(new_entries)
-                print(f"{colorize('[OK]')} {len(new_entries)} added — {len(all_entries)} total so far")
+        for i, (subcategory_name, query) in enumerate(subcategories.items(), start=1):
+            if i <= start_index:
+                continue
+            print(f"\n{colorize('[INFO]')} [{i}/{len(subcategories)}] {subcategory_name}")
+            new_entries = collect_subcategory(session, subcategory_name, query, seen_ids, all_entries, category_name, existing_file)
+            all_entries.extend(new_entries)
+            print(f"{colorize('[OK]')} {len(new_entries)} new IDs added")
 
-                if new_entries:
-                    save_ids(all_entries, category_name, existing_file=existing_file)
-                    if not existing_file:
-                        existing_file = find_ids_file(ALIEXPRESS_DATA_PATH, f"aliexpress_us_{category_slug}_ids.json")
+            if new_entries:
+                save_ids(all_entries, category_name, existing_file=existing_file)
+                if not existing_file:
+                    existing_file = find_ids_file(ALIEXPRESS_IDS_PATH, f"aliexpress_us_{category_slug}_ids.json")
 
-                if i < len(subcategories):
-                    time.sleep(random.uniform(3, 6))
+            if i < len(subcategories):
+                time.sleep(random.uniform(3, 6))
 
-            print(f"\n{colorize('[INFO]')} {category_name} done — {len(all_entries)} total IDs")
+        print(f"\n{colorize('[INFO]')} {category_name} done — {len(all_entries)} total IDs")
 
     play_alert_sound("Glass")
     elapsed = int(time.time() - start)
-    print(f"{colorize('[INFO]')} Time: {elapsed // 60}m {elapsed % 60}s")
+    print(f"{colorize('[INFO]')} Time: {format_elapsed(elapsed)}")
 
 
 if __name__ == "__main__":

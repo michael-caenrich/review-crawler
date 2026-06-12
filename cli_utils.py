@@ -1,8 +1,4 @@
-"""Shared CLI utilities: terminal colors, alerts, file helpers, and cookie setup."""
-
-
-class TokenExpiredError(Exception):
-    pass
+"""Shared CLI utilities: terminal output, file helpers, cookie handling, and API signing."""
 
 import json
 import hashlib
@@ -18,6 +14,24 @@ from requests import Session
 from config import ALIEXPRESS_DATA_PATH, COOKIES_PATH
 
 init()
+
+
+# --- Exceptions ---
+class TokenExpiredError(Exception):
+    pass
+
+
+class RateLimitError(Exception):
+    pass
+
+
+# --- Terminal output ---
+def format_elapsed(seconds: int) -> str:
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    return f"{m}m {s}s"
 
 
 def colorize(text: str) -> str:
@@ -44,6 +58,7 @@ def play_alert_sound(sound: str) -> None:
         subprocess.run(["afplay", f"/System/Library/Sounds/{sound}.aiff"])
 
 
+# --- File helpers ---
 def find_ids_file(directory: pathlib.Path, pattern: str) -> pathlib.Path:
     """Return the IDs file matching pattern in directory, or raise FileNotFoundError."""
     match = next(directory.glob(pattern), None)
@@ -54,6 +69,28 @@ def find_ids_file(directory: pathlib.Path, pattern: str) -> pathlib.Path:
     return match
 
 
+def pick_ids_file(directory: pathlib.Path) -> list[pathlib.Path]:
+    """List available IDs files in directory and let user pick one or all."""
+    files = sorted(directory.glob("*_ids.json"))
+    if not files:
+        raise FileNotFoundError(f"No IDs files found in {directory}")
+    print(f"\n{colorize('[INFO]')} ===== Available IDs Files =====")
+    for i, f in enumerate(files, start=1):
+        print(f"{i}. {f.stem}")
+    while True:
+        choice = input(f"\nEnter a number (1-{len(files)}) or 'all': ").strip().lower()
+        if choice == "all":
+            return files
+        try:
+            n = int(choice)
+            if 0 < n <= len(files):
+                return [files[n - 1]]
+        except ValueError:
+            pass
+        print(f"{colorize('[WARNING]')} Invalid value. Enter 1-{len(files)} or 'all'.")
+
+
+# --- Cookie handling ---
 def get_cookies(raw: str = "") -> None:
     """Parse raw cookie string and save to JSON. Reads raw_cookies.txt if no string provided."""
     if not raw:
@@ -81,6 +118,7 @@ def get_cookies(raw: str = "") -> None:
     print(f"{colorize('[DONE]')} {len(cookies)} cookies saved to {COOKIES_PATH.name}")
 
 
+# --- API signing ---
 def get_token(session: requests.Session | object) -> str:
     """Extract the token from the _m_h5_tk session cookie (part before the underscore)."""
     try:
@@ -103,23 +141,7 @@ def generate_sign(token: str, t: str, app_key: str, data_str: str) -> str:
 
 def refresh_cookies_cdp(session: Session, page: Page) -> None:
     """Reload the aliexpress.us page via CDP and update session cookies."""
-    page.reload()
+    # page.reload()
     cookies = page.context.cookies()
     cookies_dict = {c["name"]: c["value"] for c in cookies if "aliexpress.us" in c["domain"]}
     session.cookies.update(cookies_dict)
-
-
-def ask_max_ids(existing_count: int = 0, default: int = 1000) -> int:
-    """Ask user for max number of IDs to return."""
-    if existing_count:
-        prompt = f"\n{colorize('[INFO]')} File already has {existing_count} IDs. How many more to add? "
-    else:
-        prompt = f"\n{colorize('[INFO]')} How many product IDs to collect? (default {default}): "
-
-    while True:
-        raw = input(prompt).strip()
-        if not raw and not existing_count:
-            return default
-        if raw.isdigit() and int(raw) > 0:
-            return int(raw)
-        print(f"{colorize('[WARNING]')} Enter a positive number.")
