@@ -277,7 +277,7 @@ def main() -> None:
 
     play_alert_sound("Glass")
     elapsed = int(time.time() - start)
-    print(f"{colorize('[INFO]')} Time: {format_elapsed(elapsed)}")
+    print(f"{colorize('[INFO]')} Total time: {format_elapsed(elapsed)}")
 
 
 if __name__ == "__main__":

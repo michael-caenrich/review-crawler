@@ -5,7 +5,7 @@ Async version — fetches CONCURRENCY products simultaneously for faster collect
 Before running:
     1. Quit Chrome completely.
     2. Reopen Chrome with remote debugging enabled:
-       /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+       /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \
            --remote-debugging-port=9222 \
            --user-data-dir=$HOME/chrome-aliexpress-profile
     3. Log into aliexpress.us in that Chrome window.
@@ -32,7 +32,7 @@ from cli_utils import (
     play_alert_sound,
     get_token,
     generate_sign,
-    pick_ids_file,
+    pick_file,
     TokenExpiredError,
 )
 from config import (
@@ -198,17 +198,16 @@ async def get_reviews_for_product(
 def reviews_path_for(ids_file: pathlib.Path) -> pathlib.Path:
     """Derive the reviews Excel path from an IDs file stem."""
     category = ids_file.stem.removeprefix("aliexpress_us_").removesuffix("_ids")
-    return ALIEXPRESS_REVIEWS_PATH.parent / f"aliexpress_us_{category}_reviews_raw.xlsx"
+    return ALIEXPRESS_REVIEWS_PATH.parent / f"aliexpress_us_{category}_reviews_raw.csv"
 
 
 def save_reviews(reviews: list[dict], path: pathlib.Path) -> int:
-    """Append new reviews to the Excel file, deduplicating by product_id + review_text."""
+    """Append new reviews to the CSV file, deduplicating by product_id + review_text."""
     path.parent.mkdir(parents=True, exist_ok=True)
     new_df = pd.DataFrame(reviews)
-    new_df["hazard_label"] = ""
 
     if path.exists():
-        existing = pd.read_excel(path)
+        existing = pd.DataFrame(pd.read_csv(path))  # type: ignore
     else:
         existing = pd.DataFrame()
         print(f"{colorize('[INFO]')} Creating new {path.name}")
@@ -217,8 +216,8 @@ def save_reviews(reviews: list[dict], path: pathlib.Path) -> int:
     df["product_id"] = df["product_id"].astype(str)
     df = df.drop_duplicates(subset=["product_id", "review_text"], keep="first")
     df = df.sort_values(by="product_id", key=lambda col: col.astype(int)).reset_index(drop=True)
-    df = df[["product_id", "subcategory", "review_text", "hazard_label"]]
-    df.to_excel(path, index=False)
+    df = df[["product_id", "subcategory", "review_text"]]
+    df.to_csv(path, index=False)
     return len(df)
 
 
@@ -253,7 +252,7 @@ async def collect_all(products: list[tuple[str, str]], playwright_page, reviews_
 
 
 async def main() -> None:
-    """Connect to Chrome via CDP, collect reviews async, and save to Excel."""
+    """Connect to Chrome via CDP, collect reviews async, and save to CSV."""
     print(CDP_INSTRUCTION)
     input()
 
@@ -265,7 +264,7 @@ async def main() -> None:
         await page.goto(ALIEXPRESS_URL, wait_until="domcontentloaded", timeout=6000)
         await page.wait_for_timeout(random.randint(2000, 5000))
 
-        ids_files = pick_ids_file(ALIEXPRESS_IDS_PATH)
+        ids_files = pick_file(ALIEXPRESS_IDS_PATH)
         single_file = len(ids_files) == 1
         for ids_file in ids_files:
             reviews_path = reviews_path_for(ids_file)
