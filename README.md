@@ -20,8 +20,8 @@ and negative product signals).
 Implemented:
 - AliExpress US ID collector — uses internal search API with subcategory iteration and manual cookie refresh
 - AliExpress US review collector — async, uses internal review API with 1-star and 2-star filters, CDP cookie refresh, and concurrent product fetching
-- Excel export with append-on-save and deduplication per product
-- Placeholder `hazard_label` column for manual annotation
+- CSV export with append-on-save and deduplication per product
+- Hazard classification pipeline — two-stage LLM pipeline (pass 1: DeepSeek-V4-Flash, pass 2: stronger model validation (DeepSeek-V4-Pro))
 
 Planned next:
 - [x] Add AliExpress platform adapter
@@ -30,7 +30,7 @@ Planned next:
 - [x] AliExpress US review crawler — replace Playwright with reverse-engineered API calls
 - [x] AliExpress US ID collector — replace Playwright with reverse-engineered API calls
 - [x] AliExpress US review crawler — migrate to async (`asyncio` + `httpx`) for parallel product collection
-- [ ] Hazard classification pipeline — label `hazard_label` using local LLM (qwen3:8b)
+- [x] Hazard classification pipeline — two-stage LLM labeling with checkpoint resume and final Excel export
 
 ---
 
@@ -44,14 +44,23 @@ Planned next:
 │       └── fetch_categories_aliexpress_us_api.py        # fetch category tree from API
 ├── data/
 │   └── aliexpress_us/
-│       ├── aliexpress_us_categories.json                # raw category tree from fetch script
-│       ├── aliexpress_us_category_queries.json          # manually built subcategory → query mapping
+│       ├── aliexpress_us_categories.json                   # raw category tree from fetch script
+│       ├── aliexpress_us_category_queries.json             # manually built subcategory → query mapping
 │       ├── ids/
 │       │   └── aliexpress_us_{category}_ids.json
 │       └── reviews/
-│           └── aliexpress_us_{category}_reviews_raw.xlsx
-├── config.py                                             # file paths and shared configuration
-└── cli_utils.py                                          # shared utilities: output, cookies, API signing
+│           └── aliexpress_us_{category}_reviews_raw.csv
+├── output/
+│   └── aliexpress_us/
+│       ├── labeled_csv/
+│       │   ├── aliexpress_us_{category}_labeled.csv             # per-category checkpoint files
+│       │   ├── aliexpress_us_hazard_reviews_classified.csv      # pass 1 output (DeepSeek-V4-Flash)
+│       │   └── aliexpress_us_hazard_reviews_validated.csv       # pass 2 output (DeepSeek-V4-Pro)
+│       └── aliexpress_us_hazard_reviews_final.xlsx              # union of pass 1 and pass 2
+├── classify_reviews.py                                          # first-pass hazard classification (DeepSeek-V4-Flash)
+├── validate_hazard_labels.py                                    # second-pass validation with stronger model (DeepSeek-V4-Pro)
+├── config.py                                                    # paths, models, and prompts
+└── cli_utils.py                                                 # shared utilities: output, LLM batch, cookies, API signing
 ```
 
 ---
@@ -82,18 +91,44 @@ are returned and may need tuning to get accurate results.
 - Async — fetches multiple products concurrently (configurable via `CONCURRENCY`)
 - Uses Chrome CDP to automatically refresh session token when it expires
 - Interactive file picker — select category file at startup, supports running all files sequentially
-- Saves to `data/aliexpress_us/reviews/aliexpress_us_{category}_reviews_raw.xlsx`
+- Saves to `data/aliexpress_us/reviews/aliexpress_us_{category}_reviews_raw.csv`
 
 ---
 
 ## Data Output Schema
 
+### Raw reviews — `aliexpress_us_{category}_reviews_raw.csv`
 | Column | Description |
 |---|---|
 | `product_id` | Platform product ID |
 | `subcategory` | Subcategory the product was collected from |
 | `review_text` | Raw review content (1-star and 2-star only) |
-| `hazard_label` | Label for hazard type — to be filled by classification pipeline |
+
+### First-pass output — `aliexpress_us_hazard_reviews_classified.csv`
+| Column | Description |
+|---|---|
+| `product_id` | Platform product ID |
+| `subcategory` | Subcategory the product was collected from |
+| `review_text` | Raw review content |
+| `hazard_label_classified` | 1 = hazard flagged by first pass, 0 = not |
+
+### Validation output — `aliexpress_us_hazard_reviews_validated.csv`
+| Column | Description |
+|---|---|
+| `product_id` | Platform product ID |
+| `subcategory` | Subcategory the product was collected from |
+| `review_text` | Raw review content |
+| `hazard_label_classified` | Pass 1 label (DeepSeek-V4-Flash) |
+| `hazard_label_validated` | Pass 2 label (DeepSeek-V4-Pro) |
+
+### Final output — `aliexpress_us_hazard_reviews_final.xlsx`
+| Column | Description |
+|---|---|
+| `product_id` | Platform product ID |
+| `subcategory` | Subcategory the product was collected from |
+| `review_text` | Raw review content |
+| `hazard_label_classified` | Pass 1 label (DeepSeek-V4-Flash) |
+| `hazard_label_validated` | Union of pass 1 and pass 2 (1 = confirmed hazard) |
 
 ---
 
@@ -103,7 +138,7 @@ are returned and may need tuning to get accurate results.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
-pip install pandas playwright colorama openpyxl requests httpx
+pip install pandas playwright colorama openpyxl requests httpx openai
 ```
 
 Before running the AliExpress US review collector, launch Chrome with the debug port:
@@ -126,6 +161,15 @@ python3 crawlers/aliexpress_us/collect_ids_aliexpress_us_api.py
 
 # AliExpress US — collect reviews async (requires Chrome with debug port)
 python3 crawlers/aliexpress_us/collect_reviews_aliexpress_us_api_async.py
+```
+
+## Run Classification Pipeline
+```bash
+# Step 1 — first-pass classification (DeepSeek-V4-Flash, all reviews)
+python3 classify_reviews.py
+
+# Step 2 — second-pass validation with stronger model (DeepSeek-V4-Pro), merges both passes as union
+python3 validate_hazard_labels.py
 ```
 
 ---

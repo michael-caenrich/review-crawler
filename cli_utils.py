@@ -1,12 +1,15 @@
-"""Shared CLI utilities: terminal output, file helpers, cookie handling, and API signing."""
+"""Shared CLI utilities: terminal output, file helpers, LLM classification, cookie handling, and API signing."""
 
 import json
 import hashlib
 import pathlib
 import subprocess
 import sys
+import time
 
+import pandas as pd
 import requests
+from openai import OpenAI
 from playwright.sync_api import Page
 from colorama import Fore, Style, init
 from requests import Session
@@ -27,6 +30,7 @@ class RateLimitError(Exception):
 
 # --- Terminal output ---
 def format_elapsed(seconds: int) -> str:
+    """Format elapsed seconds as human-readable string (e.g. 2h 5m 3s)."""
     h, rem = divmod(seconds, 3600)
     m, s = divmod(rem, 60)
     if h:
@@ -69,25 +73,75 @@ def find_ids_file(directory: pathlib.Path, pattern: str) -> pathlib.Path:
     return match
 
 
-def pick_ids_file(directory: pathlib.Path) -> list[pathlib.Path]:
-    """List available IDs files in directory and let user pick one or all."""
-    files = sorted(directory.glob("*_ids.json"))
+def pick_file(directory: pathlib.Path, pattern: str = "*_ids.json") -> list[pathlib.Path]:
+    """List available files matching pattern in directory and let user pick one or all."""
+    files = sorted(directory.glob(pattern))
     if not files:
-        raise FileNotFoundError(f"No IDs files found in {directory}")
-    print(f"\n{colorize('[INFO]')} ===== Available IDs Files =====")
+        raise FileNotFoundError(f"No files matching '{pattern}' found in {directory}")
+    print(f"\n{colorize('[INFO]')} ===== Available Files =====")
     for i, f in enumerate(files, start=1):
         print(f"{i}. {f.stem}")
     while True:
-        choice = input(f"\nEnter a number (1-{len(files)}) or 'all': ").strip().lower()
+        choice = input(f"\nEnter a number, e.g. '1', multiple '1 3 5', or 'all': ").strip().lower()
         if choice == "all":
             return files
         try:
-            n = int(choice)
-            if 0 < n <= len(files):
-                return [files[n - 1]]
+            indices = [int(x) for x in choice.split()]
+            if all(0 < n <= len(files) for n in indices):
+                return [files[n - 1] for n in indices]
         except ValueError:
             pass
-        print(f"{colorize('[WARNING]')} Invalid value. Enter 1-{len(files)} or 'all'.")
+        print(f"{colorize('[WARNING]')} Invalid value. Enter numbers 1-{len(files)}, multiple numbers, or 'all'.")
+
+
+# --- LLM classification ---
+def classify_batch(reviews: list[dict[str, str | int]], prompt: str, model: str, api_key: str | None, base_url: str | None = None) -> list[int]:
+    """Classify a batch of reviews and return 0/1 labels."""
+    lines = []
+    for index, review in enumerate(reviews, start=1):
+        text = str(review["review_text"])[:300]
+        lines.append(f"{index}. {text}")
+
+    numbered = "\n".join(lines)
+
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    messages: list = [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": numbered},
+    ]
+
+    for attempt in range(3):
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=500,  # max_completion_tokens for OpenAI API
+            )
+            response = completion.choices[0].message.content
+            if response is None:
+                return []
+            response = response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            return json.loads(response)
+        except Exception as e:
+            print(f"{colorize('[WARNING]')} Request failed (attempt {attempt + 1}/3): {repr(e)}")
+            if attempt < 2:
+                time.sleep(10)
+
+    return []
+
+
+def save_progress(reviews: list[dict[str, str | int]], labels: list[int], output_path: pathlib.Path, col: str) -> None:
+    """Append labeled batch to checkpoint CSV."""
+    if not labels:
+        return
+
+    for review, label in zip(reviews, labels):
+        review[col] = label
+
+    header = not output_path.exists()
+    df = pd.DataFrame(reviews)
+    df.to_csv(output_path, index=False, mode="a", header=header)
 
 
 # --- Cookie handling ---
