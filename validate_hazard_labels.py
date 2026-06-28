@@ -86,6 +86,7 @@ def main() -> None:
         (df["hazard_label_classified"] == 1) | (df["hazard_label_validated"] == 1)
     ).astype(int)
     df_final = df[df["hazard_label_validated"] == 1]  # type: ignore
+    df_final = df_final.drop_duplicates(subset=["review_text"])
     df_final.to_excel(final_path, index=False)
     print(f"\n{colorize('[DONE]')} Saved {len(df_final)} confirmed hazard reviews (union of classified and validated)")
 
